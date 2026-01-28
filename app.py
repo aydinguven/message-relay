@@ -257,7 +257,8 @@ def fetch_vm_single(hostname_query):
             f"*Resources*\n"
             f"CPU:  `{vm.get('cpu_avg', 0):>5.1f}%` {bar(vm.get('cpu_avg', 0))}\n"
             f"RAM:  `{vm.get('ram_percent', 0):>5.1f}%` {bar(vm.get('ram_percent', 0))}\n"
-            f"Disk: `{vm.get('disk_usage', '0%'):>6}`\n\n"
+            f"*Disk Usage*:\n"
+            + "\n".join([f"  • `{k}`: `{v}`" for k, v in (vm.get('disk_usage') or {}).items()]) + "\n\n"
             f"🕒 *Last Seen*: `{last_seen}`"
         )
 
