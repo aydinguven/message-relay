@@ -5,6 +5,7 @@ A lightweight Flask service that:
 - Holds the Telegram bot token centrally
 - Authenticates clients via API key
 - Only sends predefined message templates
+- Handles Telegram bot commands (/summary, /detailed)
 
 Run: python app.py
 """
@@ -42,6 +43,12 @@ DEFAULT_TEMPLATES = {
     "test": "✅ Message relay is working! Sent at {timestamp}",
     "custom": "{message}"
 }
+
+
+def get_authorized_chats():
+    """Get list of chat IDs authorized to use bot commands."""
+    config = load_config()
+    return config.get("authorized_chats", [])
 
 
 def load_config():
@@ -118,14 +125,232 @@ def send_telegram_message(chat_id: str, text: str) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def fetch_vm_summary():
+    """Fetch VM summary from VM Monitor API."""
+    config = load_config()
+    vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    
+    try:
+        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        vms = response.json()
+        
+        if isinstance(vms, dict) and "vms" in vms:
+            vms = vms["vms"]
+        
+        # Count online/offline
+        online = sum(1 for vm in vms if vm.get("status") == "online")
+        offline = sum(1 for vm in vms if vm.get("status") == "offline")
+        
+        # Count alerts/warnings
+        alerts = 0
+        warnings = 0
+        for vm in vms:
+            cpu = vm.get("cpu_avg", 0)
+            ram = vm.get("ram_percent", 0)
+            if cpu >= 90 or ram >= 90:
+                alerts += 1
+            elif cpu >= 80 or ram >= 80:
+                warnings += 1
+        
+        # Build message
+        status_emoji = "🟢" if alerts == 0 and warnings == 0 else ("🔴" if alerts > 0 else "🟡")
+        lines = [
+            f"{status_emoji} *VM Monitor Summary*",
+            f"📊 {online} online, {offline} offline"
+        ]
+        if alerts > 0:
+            lines.append(f"🚨 {alerts} critical alerts")
+        if warnings > 0:
+            lines.append(f"⚠️ {warnings} warnings")
+        if alerts == 0 and warnings == 0:
+            lines.append("✅ All systems healthy")
+        
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error fetching VM summary: {e}")
+        return f"❌ Error fetching VMs: {e}"
+
+
+def fetch_vm_detailed():
+    """Fetch detailed VM list from VM Monitor API."""
+    config = load_config()
+    vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    
+    try:
+        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        vms = response.json()
+        
+        if isinstance(vms, dict) and "vms" in vms:
+            vms = vms["vms"]
+        
+        lines = ["📋 *VM Status List*", ""]
+        
+        # Sort by status (offline first, then by CPU)
+        vms_sorted = sorted(vms, key=lambda v: (
+            v.get("status") == "online",  # Offline first
+            -v.get("cpu_avg", 0)  # Then by CPU descending
+        ))
+        
+        for vm in vms_sorted[:15]:  # Limit to 15 VMs
+            status = vm.get("status", "unknown")
+            hostname = vm.get("hostname", "?")[:20]
+            cpu = vm.get("cpu_avg", 0)
+            ram = vm.get("ram_percent", 0)
+            
+            if status == "offline":
+                emoji = "🔴"
+            elif cpu >= 90 or ram >= 90:
+                emoji = "🔴"
+            elif cpu >= 80 or ram >= 80:
+                emoji = "🟡"
+            else:
+                emoji = "🟢"
+            
+            lines.append(f"{emoji} `{hostname}` CPU:{cpu:.0f}% RAM:{ram:.0f}%")
+        
+        if len(vms) > 15:
+            lines.append(f"\n_...and {len(vms) - 15} more VMs_")
+        
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error fetching VM details: {e}")
+        return f"❌ Error fetching VMs: {e}"
+
+
+def handle_bot_command(chat_id: str, command: str, user_name: str = ""):
+    """Handle incoming bot commands."""
+    # Check authorization
+    authorized = get_authorized_chats()
+    if authorized and str(chat_id) not in [str(c) for c in authorized]:
+        logger.warning(f"Unauthorized command attempt from {chat_id}")
+        send_telegram_message(chat_id, "⛔ You are not authorized to use this bot.")
+        return
+    
+    command = command.lower().strip()
+    
+    if command == "/start":
+        msg = (
+            "👋 *VM Monitor Bot*\n\n"
+            "Available commands:\n"
+            "/summary - Quick overview\n"
+            "/detailed - Full VM list\n"
+            "/help - Show this message"
+        )
+        send_telegram_message(chat_id, msg)
+    
+    elif command == "/summary":
+        msg = fetch_vm_summary()
+        send_telegram_message(chat_id, msg)
+    
+    elif command == "/detailed" or command == "/detail" or command == "/list":
+        msg = fetch_vm_detailed()
+        send_telegram_message(chat_id, msg)
+    
+    elif command == "/help":
+        msg = (
+            "📖 *Help*\n\n"
+            "/summary - Quick status overview\n"
+            "/detailed - Full VM list with CPU/RAM\n"
+            "/help - This help message"
+        )
+        send_telegram_message(chat_id, msg)
+    
+    else:
+        send_telegram_message(chat_id, "❓ Unknown command. Try /help")
+
+
 @app.route("/")
 def index():
     """Health check endpoint."""
     return jsonify({
         "service": "message-relay",
         "status": "ok",
-        "version": "1.0.0"
+        "version": "1.1.0"
     })
+
+
+@app.route("/webhook", methods=["POST"])
+def telegram_webhook():
+    """Handle incoming Telegram updates (webhook mode)."""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"ok": True})
+    
+    # Extract message info
+    message = data.get("message", {})
+    text = message.get("text", "")
+    chat = message.get("chat", {})
+    chat_id = chat.get("id")
+    user = message.get("from", {})
+    user_name = user.get("first_name", "")
+    
+    if not chat_id or not text:
+        return jsonify({"ok": True})
+    
+    # Only handle commands (messages starting with /)
+    if text.startswith("/"):
+        command = text.split()[0]  # Get just the command, ignore @botname
+        command = command.split("@")[0]  # Remove @botname suffix
+        logger.info(f"Bot command from {chat_id} ({user_name}): {command}")
+        handle_bot_command(str(chat_id), command, user_name)
+    
+    return jsonify({"ok": True})
+
+
+@app.route("/webhook/setup", methods=["POST"])
+@require_api_key
+def setup_webhook():
+    """Set up Telegram webhook."""
+    data = request.get_json() or {}
+    webhook_url = data.get("webhook_url")
+    
+    if not webhook_url:
+        return jsonify({"error": "webhook_url is required"}), 400
+    
+    config = load_config()
+    bot_token = config.get("telegram_bot_token", "")
+    
+    if not bot_token:
+        return jsonify({"error": "Bot token not configured"}), 400
+    
+    # Set webhook
+    url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
+    try:
+        response = requests.post(url, json={"url": webhook_url}, timeout=30)
+        result = response.json()
+        
+        if result.get("ok"):
+            logger.info(f"Webhook set to {webhook_url}")
+            return jsonify({"success": True, "message": "Webhook configured"})
+        else:
+            return jsonify({"error": result.get("description")}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/webhook/delete", methods=["POST"])
+@require_api_key  
+def delete_webhook():
+    """Delete Telegram webhook (switch back to polling)."""
+    config = load_config()
+    bot_token = config.get("telegram_bot_token", "")
+    
+    if not bot_token:
+        return jsonify({"error": "Bot token not configured"}), 400
+    
+    url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
+    try:
+        response = requests.post(url, timeout=30)
+        result = response.json()
+        
+        if result.get("ok"):
+            logger.info("Webhook deleted")
+            return jsonify({"success": True, "message": "Webhook deleted"})
+        else:
+            return jsonify({"error": result.get("description")}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/templates")
@@ -287,7 +512,9 @@ if __name__ == "__main__":
     if not CONFIG_FILE.exists():
         default_config = {
             "telegram_bot_token": "",
-            "api_keys": ["changeme"]
+            "api_keys": ["changeme"],
+            "vm_monitor_url": "http://localhost:5000",
+            "authorized_chats": []
         }
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(default_config, f, indent=2)
