@@ -313,7 +313,7 @@ def handle_bot_command(chat_id: str, command: str, user_name: str = ""):
     
     full_command = command.lower().strip()
     parts = full_command.split()
-    cmd = parts[0]
+    cmd = parts[0].split('@')[0]  # Handle /command@botname
     args = parts[1:] if len(parts) > 1 else []
     
     if cmd == "/start":
@@ -392,10 +392,9 @@ def telegram_webhook():
     
     # Only handle commands (messages starting with /)
     if text.startswith("/"):
-        command = text.split()[0]  # Get just the command, ignore @botname
-        command = command.split("@")[0]  # Remove @botname suffix
-        logger.info(f"Bot command from {chat_id} ({user_name}): {command}")
-        handle_bot_command(str(chat_id), command, user_name)
+        # Log the raw text for debugging, pass full text to handler
+        logger.info(f"Bot command from {chat_id} ({user_name}): {text}")
+        handle_bot_command(str(chat_id), text, user_name)
     
     return jsonify({"ok": True})
 
