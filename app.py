@@ -277,7 +277,9 @@ def fetch_vm_detailed():
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
         
-        lines = ["📋 *Fleet Status*", ""]
+        # Header
+        table = f"{'Host':<14} {'CPU':<4} {'RAM':<4} {'Disk':<4}\n"
+        table += "-" * 30 + "\n"
         
         vms_sorted = sorted(vms, key=lambda v: (
             v.get("status") == "online",
@@ -286,24 +288,26 @@ def fetch_vm_detailed():
         
         for vm in vms_sorted[:20]:
             is_online = vm.get("online", False)
-            hostname = vm.get("hostname", "?")
-            cpu = vm.get("cpu_avg", 0)
-            ram = vm.get("ram_percent", 0)
-            disk = vm.get("disk_usage", "0%")
+            # Truncate hostname to 14 chars
+            hostname = vm.get("hostname", "?")[:13]
             
-            emoji = "🔴" if not is_online else ("🟡" if cpu > 80 else "🟢")
-            
-            # Compact format
-            lines.append(f"{emoji} *{hostname}*")
             if is_online:
-                lines.append(f"   CPU:`{cpu:.0f}%` RAM:`{ram:.0f}%` Disk:`{disk}`")
+                cpu = f"{vm.get('cpu_avg', 0):.0f}%"
+                ram = f"{vm.get('ram_percent', 0):.0f}%"
+                disk = vm.get("disk_usage", "0%")
+                # Clean disk string (remove extra chars if needed)
+                if isinstance(disk, str): 
+                    disk = disk.replace(" ", "")
+                
+                table += f"{hostname:<14} {cpu:<4} {ram:<4} {disk:<4}\n"
             else:
-                lines.append("   ⚠️ *OFFLINE*")
+                table += f"{hostname:<14} 🔴 OFFLINE\n"
         
         if len(vms) > 20:
-            lines.append(f"\n_...and {len(vms) - 20} more_")
+            table += f"\n...and {len(vms) - 20} more"
         
-        return "\n".join(lines)
+        return f"📋 *Fleet Status*\n```\n{table}```"
+
     except Exception as e:
         logger.error(f"Error fetching VM details: {e}")
         return f"❌ Error: {e}"
