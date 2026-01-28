@@ -171,6 +171,90 @@ def fetch_vm_summary():
         return f"❌ Error fetching VMs: {e}"
 
 
+def fetch_vm_alerts():
+    """Fetch only VMs with alerts/warnings."""
+    config = load_config()
+    vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    
+    try:
+        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        vms = response.json()
+        
+        if isinstance(vms, dict) and "vms" in vms:
+            vms = vms["vms"]
+        
+        issues = []
+        for vm in vms:
+            cpu = vm.get("cpu_avg", 0)
+            ram = vm.get("ram_percent", 0)
+            disk_str = vm.get("disk_usage", "0%")
+            status = vm.get("status", "unknown")
+            
+            # Parse disk (format e.g "45%")
+            try:
+                disk = float(disk_str.strip('%'))
+            except:
+                disk = 0
+
+            if status == "offline":
+                issues.append(f"🔴 `{vm.get('hostname')}` is OFFLINE")
+            elif cpu >= 80 or ram >= 80 or disk >= 90:
+                reason = []
+                if cpu >= 80: reason.append(f"CPU {cpu:.0f}%")
+                if ram >= 80: reason.append(f"RAM {ram:.0f}%")
+                if disk >= 90: reason.append(f"Disk {disk:.0f}%")
+                
+                emoji = "🔴" if (cpu>=90 or ram>=90 or disk>=95) else "⚠️"
+                issues.append(f"{emoji} `{vm.get('hostname')}`: {', '.join(reason)}")
+
+        if not issues:
+            return "✅ No active alerts. All systems healthy."
+            
+        return "🚨 *Active Alerts*\n\n" + "\n".join(issues)
+
+    except Exception as e:
+        logger.error(f"Error fetching alerts: {e}")
+        return f"❌ Error: {e}"
+
+
+def fetch_vm_single(hostname_query):
+    """Fetch details for a specific VM."""
+    config = load_config()
+    vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    
+    try:
+        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        vms = response.json()
+        if isinstance(vms, dict) and "vms" in vms:
+            vms = vms["vms"]
+            
+        # Find match (case-insensitive substring)
+        matches = [v for v in vms if hostname_query.lower() in v.get("hostname", "").lower()]
+        
+        if not matches:
+            return f"❓ No VM found matching `{hostname_query}`"
+        
+        if len(matches) > 1:
+            return f"⚠️ Found {len(matches)} matches. Please be more specific:\n" + \
+                   "\n".join([f"- `{m.get('hostname')}`" for m in matches[:5]])
+        
+        vm = matches[0]
+        status = vm.get("status", "unknown")
+        emoji = "🟢" if status == "online" else "🔴"
+        
+        return (
+            f"{emoji} *{vm.get('hostname')}*\n"
+            f"CPU: `{vm.get('cpu_avg', 0):.1f}%`\n"
+            f"RAM: `{vm.get('ram_percent', 0):.1f}%`\n"
+            f"Disk: `{vm.get('disk_usage', '0%')}`\n"
+            f"Last seen: `{vm.get('last_seen', 'Unknown')}`"
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching VM: {e}")
+        return f"❌ Error: {e}"
+
+
 def fetch_vm_detailed():
     """Fetch detailed VM list from VM Monitor API."""
     config = load_config()
@@ -185,17 +269,18 @@ def fetch_vm_detailed():
         
         lines = ["📋 *VM Status List*", ""]
         
-        # Sort by status (offline first, then by CPU)
+        # Sort: Offline > High CPU > Name
         vms_sorted = sorted(vms, key=lambda v: (
-            v.get("status") == "online",  # Offline first
-            -v.get("cpu_avg", 0)  # Then by CPU descending
+            v.get("status") == "online",
+            -v.get("cpu_avg", 0)
         ))
         
-        for vm in vms_sorted[:15]:  # Limit to 15 VMs
+        for vm in vms_sorted[:20]:
             status = vm.get("status", "unknown")
             hostname = vm.get("hostname", "?")[:20]
             cpu = vm.get("cpu_avg", 0)
             ram = vm.get("ram_percent", 0)
+            disk = vm.get("disk_usage", "0%")
             
             if status == "offline":
                 emoji = "🔴"
@@ -206,10 +291,10 @@ def fetch_vm_detailed():
             else:
                 emoji = "🟢"
             
-            lines.append(f"{emoji} `{hostname}` CPU:{cpu:.0f}% RAM:{ram:.0f}%")
+            lines.append(f"{emoji} `{hostname}`\n   ├ CPU: {cpu:.0f}%  RAM: {ram:.0f}%\n   └ Disk: {disk}")
         
-        if len(vms) > 15:
-            lines.append(f"\n_...and {len(vms) - 15} more VMs_")
+        if len(vms) > 20:
+            lines.append(f"\n_...and {len(vms) - 20} more VMs_")
         
         return "\n".join(lines)
     except Exception as e:
@@ -226,32 +311,49 @@ def handle_bot_command(chat_id: str, command: str, user_name: str = ""):
         send_telegram_message(chat_id, "⛔ You are not authorized to use this bot.")
         return
     
-    command = command.lower().strip()
+    full_command = command.lower().strip()
+    parts = full_command.split()
+    cmd = parts[0]
+    args = parts[1:] if len(parts) > 1 else []
     
-    if command == "/start":
+    if cmd == "/start":
         msg = (
             "👋 *VM Monitor Bot*\n\n"
             "Available commands:\n"
             "/summary - Quick overview\n"
-            "/detailed - Full VM list\n"
+            "/alerts - Active issues only\n"
+            "/detailed - Full list with Disk usage\n"
+            "/vm <name> - Specific VM details\n"
             "/help - Show this message"
         )
         send_telegram_message(chat_id, msg)
     
-    elif command == "/summary":
+    elif cmd == "/summary":
         msg = fetch_vm_summary()
         send_telegram_message(chat_id, msg)
-    
-    elif command == "/detailed" or command == "/detail" or command == "/list":
-        msg = fetch_vm_detailed()
+
+    elif cmd == "/alerts":
+        msg = fetch_vm_alerts()
         send_telegram_message(chat_id, msg)
     
-    elif command == "/help":
+    elif cmd in ["/detailed", "/detail", "/list"]:
+        msg = fetch_vm_detailed()
+        send_telegram_message(chat_id, msg)
+        
+    elif cmd == "/vm":
+        if not args:
+            send_telegram_message(chat_id, "ℹ️ Usage: `/vm <hostname>`")
+        else:
+            msg = fetch_vm_single(args[0])
+            send_telegram_message(chat_id, msg)
+    
+    elif cmd == "/help":
         msg = (
             "📖 *Help*\n\n"
             "/summary - Quick status overview\n"
-            "/detailed - Full VM list with CPU/RAM\n"
-            "/help - This help message"
+            "/alerts - Show OFFLINE or High Resource VMs\n"
+            "/detailed - List all VMs (CPU/RAM/Disk)\n"
+            "/vm <name> - Details for specific VM\n"
         )
         send_telegram_message(chat_id, msg)
     
