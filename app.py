@@ -132,10 +132,16 @@ def fetch_vm_summary():
     
     try:
         response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        if response.status_code != 200:
+             return f"⚠️ API Error: {response.status_code} - {response.text}"
+             
         vms = response.json()
         
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
+            
+        if not isinstance(vms, list):
+             return f"⚠️ Unexpected API response type: {type(vms)}"
         
         # Count online/offline
         online = sum(1 for vm in vms if vm.get("status") == "online")
@@ -178,9 +184,15 @@ def fetch_vm_alerts():
     
     try:
         response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        if response.status_code != 200:
+             return f"⚠️ API Error: {response.status_code}"
+             
         vms = response.json()
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
+            
+        if not isinstance(vms, list):
+             return f"⚠️ API returned {type(vms)}, expected list"
         
         issues = []
         for vm in vms:
@@ -225,9 +237,15 @@ def fetch_vm_single(hostname_query):
     
     try:
         response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        if response.status_code != 200:
+             return f"⚠️ API Error: {response.status_code}"
+
         vms = response.json()
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
+            
+        if not isinstance(vms, list):
+             return f"⚠️ API returned {type(vms)}, expected list"
             
         matches = [v for v in vms if hostname_query.lower() in v.get("hostname", "").lower()]
         
@@ -274,9 +292,15 @@ def fetch_vm_detailed():
     
     try:
         response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        if response.status_code != 200:
+             return f"⚠️ API Error: {response.status_code}"
+
         vms = response.json()
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
+            
+        if not isinstance(vms, list):
+             return f"⚠️ API returned {type(vms)}, expected list"
         
         # Header
         table = f"{'Host':<14} {'CPU':<4} {'RAM':<4} {'Disk':<4}\n"
@@ -295,10 +319,26 @@ def fetch_vm_detailed():
             if is_online:
                 cpu = f"{vm.get('cpu_avg', 0):.0f}%"
                 ram = f"{vm.get('ram_percent', 0):.0f}%"
-                disk = vm.get("disk_usage", "0%")
-                # Clean disk string (remove extra chars if needed)
-                if isinstance(disk, str): 
-                    disk = disk.replace(" ", "")
+                
+                # Handle disk parsing (it's a dict like {'/': '20%'})
+                disk_data = vm.get("disk_usage")
+                disk_val = 0
+                if isinstance(disk_data, dict):
+                    # Find max usage across mounts
+                    try:
+                        disk_val = max([float(v.strip('%')) for v in disk_data.values() if v.strip('%').replace('.', '', 1).isdigit()], default=0)
+                    except Exception:
+                        disk_val = 0
+                elif isinstance(disk_data, (int, float)):
+                    disk_val = disk_data
+                elif isinstance(disk_data, str):
+                    # Fallback for string "45%"
+                    try:
+                        disk_val = float(disk_data.strip('%'))
+                    except:
+                        disk_val = 0
+                        
+                disk = f"{disk_val:.0f}%"
                 
                 table += f"{hostname:<14} {cpu:<4} {ram:<4} {disk:<4}\n"
             else:
