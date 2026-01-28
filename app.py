@@ -187,7 +187,8 @@ def fetch_vm_alerts():
             cpu = vm.get("cpu_avg", 0)
             ram = vm.get("ram_percent", 0)
             disk_str = vm.get("disk_usage", "0%")
-            status = vm.get("status", "unknown")
+            is_online = vm.get("online", False)
+            status = "online" if is_online else "offline"
             last_seen = vm.get("last_seen", "").replace("T", " ")[:16]
 
             # Parse disk
@@ -196,7 +197,7 @@ def fetch_vm_alerts():
             except:
                 disk = 0
 
-            if status == "offline":
+            if not is_online:
                 issues.append(f"🔴 *{vm.get('hostname')}* is OFFLINE\n    └ _Last seen: {last_seen}_")
             elif cpu >= 80 or ram >= 80 or disk >= 90:
                 reason = []
@@ -238,8 +239,8 @@ def fetch_vm_single(hostname_query):
                    "\n".join([f"- `{m.get('hostname')}`" for m in matches[:5]])
         
         vm = matches[0]
-        status = vm.get("status", "unknown")
-        emoji = "🟢" if status == "online" else "🔴"
+        is_online = vm.get("online", False)
+        emoji = "🟢" if is_online else "🔴"
         last_seen = vm.get("last_seen", "").replace("T", " ")
         
         # Helper for progress bar
@@ -284,17 +285,17 @@ def fetch_vm_detailed():
         ))
         
         for vm in vms_sorted[:20]:
-            status = vm.get("status", "unknown")
+            is_online = vm.get("online", False)
             hostname = vm.get("hostname", "?")
             cpu = vm.get("cpu_avg", 0)
             ram = vm.get("ram_percent", 0)
             disk = vm.get("disk_usage", "0%")
             
-            emoji = "🔴" if status == "offline" else ("🟡" if cpu > 80 else "🟢")
+            emoji = "🔴" if not is_online else ("🟡" if cpu > 80 else "🟢")
             
             # Compact format
             lines.append(f"{emoji} *{hostname}*")
-            if status == "online":
+            if is_online:
                 lines.append(f"   CPU:`{cpu:.0f}%` RAM:`{ram:.0f}%` Disk:`{disk}`")
             else:
                 lines.append("   ⚠️ *OFFLINE*")
