@@ -1,0 +1,9 @@
+{
+    "vm_alert": "🔴 *{hostname}* - {resource} at {value}%\n\n[View Dashboard]({dashboard_url})",
+    "vm_warning": "⚠️ *{hostname}* - {resource} at {value}%",
+    "summary": "📊 *Alert Summary*\n\n{count} VMs need attention:\n{details}\n\n[View Dashboard]({dashboard_url})",
+    "vm_offline": "🔌 *{hostname}* is offline\nLast seen: {last_seen}",
+    "vm_recovered": "✅ *{hostname}* - {resource} recovered to {value}%",
+    "test": "✅ Message relay is working!\n\nSent at {timestamp}",
+    "custom": "{message}"
+}
