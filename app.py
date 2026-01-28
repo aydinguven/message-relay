@@ -179,7 +179,6 @@ def fetch_vm_alerts():
     try:
         response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
         vms = response.json()
-        
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
         
@@ -189,15 +188,16 @@ def fetch_vm_alerts():
             ram = vm.get("ram_percent", 0)
             disk_str = vm.get("disk_usage", "0%")
             status = vm.get("status", "unknown")
-            
-            # Parse disk (format e.g "45%")
+            last_seen = vm.get("last_seen", "").replace("T", " ")[:16]
+
+            # Parse disk
             try:
                 disk = float(disk_str.strip('%'))
             except:
                 disk = 0
 
             if status == "offline":
-                issues.append(f"🔴 `{vm.get('hostname')}` is OFFLINE")
+                issues.append(f"🔴 *{vm.get('hostname')}* is OFFLINE\n    └ _Last seen: {last_seen}_")
             elif cpu >= 80 or ram >= 80 or disk >= 90:
                 reason = []
                 if cpu >= 80: reason.append(f"CPU {cpu:.0f}%")
@@ -205,12 +205,12 @@ def fetch_vm_alerts():
                 if disk >= 90: reason.append(f"Disk {disk:.0f}%")
                 
                 emoji = "🔴" if (cpu>=90 or ram>=90 or disk>=95) else "⚠️"
-                issues.append(f"{emoji} `{vm.get('hostname')}`: {', '.join(reason)}")
+                issues.append(f"{emoji} *{vm.get('hostname')}*: {', '.join(reason)}")
 
         if not issues:
-            return "✅ No active alerts. All systems healthy."
+            return "✅ *System Healthy*\nNo active alerts found."
             
-        return "🚨 *Active Alerts*\n\n" + "\n".join(issues)
+        return "🚨 *Active Alerts*\n\n" + "\n\n".join(issues)
 
     except Exception as e:
         logger.error(f"Error fetching alerts: {e}")
@@ -228,26 +228,36 @@ def fetch_vm_single(hostname_query):
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
             
-        # Find match (case-insensitive substring)
         matches = [v for v in vms if hostname_query.lower() in v.get("hostname", "").lower()]
         
         if not matches:
-            return f"❓ No VM found matching `{hostname_query}`"
+            return f"❓ No VM found containing `{hostname_query}`"
         
         if len(matches) > 1:
-            return f"⚠️ Found {len(matches)} matches. Please be more specific:\n" + \
+            return f"⚠️ Found {len(matches)} matches:\n" + \
                    "\n".join([f"- `{m.get('hostname')}`" for m in matches[:5]])
         
         vm = matches[0]
         status = vm.get("status", "unknown")
         emoji = "🟢" if status == "online" else "🔴"
+        last_seen = vm.get("last_seen", "").replace("T", " ")
         
+        # Helper for progress bar
+        def bar(percent):
+            filled = int(percent / 10)
+            return "▰" * filled + "▱" * (10 - filled)
+
         return (
             f"{emoji} *{vm.get('hostname')}*\n"
-            f"CPU: `{vm.get('cpu_avg', 0):.1f}%`\n"
-            f"RAM: `{vm.get('ram_percent', 0):.1f}%`\n"
-            f"Disk: `{vm.get('disk_usage', '0%')}`\n"
-            f"Last seen: `{vm.get('last_seen', 'Unknown')}`"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"💻 *OS*: `{vm.get('os_name', 'Unknown')}`\n"
+            f"📟 *Agent*: `v{vm.get('agent_version', '?')}`\n"
+            f"🔄 *Updates*: `{vm.get('pending_updates', 0)}` pending\n\n"
+            f"*Resources*\n"
+            f"CPU:  `{vm.get('cpu_avg', 0):>5.1f}%` {bar(vm.get('cpu_avg', 0))}\n"
+            f"RAM:  `{vm.get('ram_percent', 0):>5.1f}%` {bar(vm.get('ram_percent', 0))}\n"
+            f"Disk: `{vm.get('disk_usage', '0%'):>6}`\n\n"
+            f"🕒 *Last Seen*: `{last_seen}`"
         )
 
     except Exception as e:
@@ -256,20 +266,18 @@ def fetch_vm_single(hostname_query):
 
 
 def fetch_vm_detailed():
-    """Fetch detailed VM list from VM Monitor API."""
+    """Fetch detailed VM list."""
     config = load_config()
     vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
     
     try:
         response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
         vms = response.json()
-        
         if isinstance(vms, dict) and "vms" in vms:
             vms = vms["vms"]
         
-        lines = ["📋 *VM Status List*", ""]
+        lines = ["📋 *Fleet Status*", ""]
         
-        # Sort: Offline > High CPU > Name
         vms_sorted = sorted(vms, key=lambda v: (
             v.get("status") == "online",
             -v.get("cpu_avg", 0)
@@ -277,29 +285,27 @@ def fetch_vm_detailed():
         
         for vm in vms_sorted[:20]:
             status = vm.get("status", "unknown")
-            hostname = vm.get("hostname", "?")[:20]
+            hostname = vm.get("hostname", "?")
             cpu = vm.get("cpu_avg", 0)
             ram = vm.get("ram_percent", 0)
             disk = vm.get("disk_usage", "0%")
             
-            if status == "offline":
-                emoji = "🔴"
-            elif cpu >= 90 or ram >= 90:
-                emoji = "🔴"
-            elif cpu >= 80 or ram >= 80:
-                emoji = "🟡"
-            else:
-                emoji = "🟢"
+            emoji = "🔴" if status == "offline" else ("🟡" if cpu > 80 else "🟢")
             
-            lines.append(f"{emoji} `{hostname}`\n   ├ CPU: {cpu:.0f}%  RAM: {ram:.0f}%\n   └ Disk: {disk}")
+            # Compact format
+            lines.append(f"{emoji} *{hostname}*")
+            if status == "online":
+                lines.append(f"   CPU:`{cpu:.0f}%` RAM:`{ram:.0f}%` Disk:`{disk}`")
+            else:
+                lines.append("   ⚠️ *OFFLINE*")
         
         if len(vms) > 20:
-            lines.append(f"\n_...and {len(vms) - 20} more VMs_")
+            lines.append(f"\n_...and {len(vms) - 20} more_")
         
         return "\n".join(lines)
     except Exception as e:
         logger.error(f"Error fetching VM details: {e}")
-        return f"❌ Error fetching VMs: {e}"
+        return f"❌ Error: {e}"
 
 
 def handle_bot_command(chat_id: str, command: str, user_name: str = ""):
