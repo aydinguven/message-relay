@@ -356,10 +356,10 @@ def fetch_vm_detailed():
 
 def handle_bot_command(chat_id: str, command: str, user_name: str = ""):
     """Handle incoming bot commands."""
-    # Check authorization
+    # Check authorization - FAIL-SECURE: Deny if no authorized chats configured
     authorized = get_authorized_chats()
-    if authorized and str(chat_id) not in [str(c) for c in authorized]:
-        logger.warning(f"Unauthorized command attempt from {chat_id}")
+    if not authorized or str(chat_id) not in [str(c) for c in authorized]:
+        logger.warning(f"Unauthorized command attempt from {chat_id} ({user_name})")
         send_telegram_message(chat_id, "⛔ You are not authorized to use this bot.")
         return
     

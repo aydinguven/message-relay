@@ -32,9 +32,22 @@ python app.py
     "api_keys": [
         "your-api-key-1",
         "your-api-key-2"
+    ],
+    "authorized_chats": [
+        "123456789",
+        "987654321"
     ]
 }
 ```
+
+**Finding your Chat ID:**
+1. Start the bot (even without auth configured temporarily)
+2. Send any message to your bot (e.g., `/start`)
+3. Check the logs - you'll see: `Bot command from <YOUR_CHAT_ID> (YourName): /start`
+4. Add that Chat ID to `authorized_chats`
+5. Restart the bot
+
+> **Security Note:** Only users whose Chat IDs are in `authorized_chats` can use bot commands. If this list is empty or missing, **all commands will be rejected**.
 
 ### `templates.json` (optional)
 Add custom templates:
