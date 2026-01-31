@@ -29,7 +29,8 @@ Required configuration:
     "telegram_bot_token": "YOUR_BOT_TOKEN",
     "api_keys": ["your-secure-api-key"],
     "authorized_chats": ["YOUR_TELEGRAM_CHAT_ID"],
-    "vm_monitor_url": "http://your-vm-monitor:5000"
+    "vm_monitor_url": "http://your-vm-monitor:5000",
+    "vm_monitor_api_key": "vm-monitor-api-key"
 }
 ```
 

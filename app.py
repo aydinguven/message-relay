@@ -129,9 +129,11 @@ def fetch_vm_summary():
     """Fetch VM summary from VM Monitor API."""
     config = load_config()
     vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    api_key = config.get("vm_monitor_api_key", "")
+    headers = {"X-API-Key": api_key} if api_key else {}
     
     try:
-        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        response = requests.get(f"{vm_monitor_url}/api/vms", headers=headers, timeout=10)
         if response.status_code != 200:
              return f"⚠️ API Error: {response.status_code} - {response.text}"
              
@@ -181,9 +183,11 @@ def fetch_vm_alerts():
     """Fetch only VMs with alerts/warnings."""
     config = load_config()
     vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    api_key = config.get("vm_monitor_api_key", "")
+    headers = {"X-API-Key": api_key} if api_key else {}
     
     try:
-        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        response = requests.get(f"{vm_monitor_url}/api/vms", headers=headers, timeout=10)
         if response.status_code != 200:
              return f"⚠️ API Error: {response.status_code}"
              
@@ -234,9 +238,11 @@ def fetch_vm_single(hostname_query):
     """Fetch details for a specific VM."""
     config = load_config()
     vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    api_key = config.get("vm_monitor_api_key", "")
+    headers = {"X-API-Key": api_key} if api_key else {}
     
     try:
-        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        response = requests.get(f"{vm_monitor_url}/api/vms", headers=headers, timeout=10)
         if response.status_code != 200:
              return f"⚠️ API Error: {response.status_code}"
 
@@ -289,9 +295,11 @@ def fetch_vm_detailed():
     """Fetch detailed VM list."""
     config = load_config()
     vm_monitor_url = config.get("vm_monitor_url", "http://localhost:5000")
+    api_key = config.get("vm_monitor_api_key", "")
+    headers = {"X-API-Key": api_key} if api_key else {}
     
     try:
-        response = requests.get(f"{vm_monitor_url}/api/vms", timeout=10)
+        response = requests.get(f"{vm_monitor_url}/api/vms", headers=headers, timeout=10)
         if response.status_code != 200:
              return f"⚠️ API Error: {response.status_code}"
 
@@ -667,6 +675,7 @@ if __name__ == "__main__":
             "telegram_bot_token": "",
             "api_keys": ["changeme"],
             "vm_monitor_url": "http://localhost:5000",
+            "vm_monitor_api_key": "",
             "authorized_chats": []
         }
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
