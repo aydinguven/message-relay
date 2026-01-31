@@ -113,7 +113,61 @@ curl http://localhost:5001/templates -H "X-API-Key: your-api-key"
 | `test` | (none) | ✅ Message relay is working! |
 | `custom` | message | (any text) |
 
+## Telegram Bot Commands
+
+The bot supports interactive commands for querying VM status directly from Telegram:
+
+| Command | Description |
+|---------|-------------|
+| `/start` or `/help` | Show available commands |
+| `/summary` | Quick overview of all VMs (online/offline counts, alerts) |
+| `/alerts` | Show only VMs with issues (offline or high resource usage) |
+| `/detailed` | Full list of all VMs with CPU/RAM/Disk metrics |
+| `/vm <hostname>` | Detailed stats for a specific VM |
+
+### Bot Command Authorization
+
+**🔒 Security:** Bot commands use a **separate authorization mechanism** from API endpoints.
+
+- **API endpoints** (`/send`, `/send/batch`) require an API key via `X-API-Key` header
+- **Bot commands** (like `/summary`, `/alerts`) require the user's Telegram Chat ID to be in the `authorized_chats` list
+
+**How it works:**
+1. When a user sends a command to the bot, the webhook receives their Chat ID
+2. The bot checks if that Chat ID exists in `authorized_chats` in `config.json`
+3. If **not authorized** → User receives: "⛔ You are not authorized to use this bot."
+4. If **authorized** → Command is executed and results are sent
+
+**Fail-safe behavior:**
+- If `authorized_chats` is **empty** or **missing** → **ALL users are denied** (secure by default)
+- If `authorized_chats` contains IDs → **Only those users** can use commands
+- Unauthorized attempts are logged with: `Unauthorized command attempt from <chat_id> (<username>)`
+
+### Setting Up Bot Commands
+
+1. **Configure webhook** (required for bot commands):
+   ```bash
+   curl -X POST http://localhost:5001/webhook/setup \
+     -H "X-API-Key: your-api-key" \
+     -H "Content-Type: application/json" \
+     -d '{"webhook_url": "https://your-domain.com/webhook"}'
+   ```
+
+2. **Configure VM Monitor URL** in `instance/config.json`:
+   ```json
+   {
+       "telegram_bot_token": "...",
+       "api_keys": ["..."],
+       "authorized_chats": ["123456789"],
+       "vm_monitor_url": "http://your-vm-monitor:5000"
+   }
+   ```
+
+3. **Test the bot** by sending `/summary` in Telegram
+
 ## VM Monitor Integration
+
+### For Automated Alerts
 
 In your VM Monitor `instance/sms_config.json`:
 
@@ -127,6 +181,10 @@ In your VM Monitor `instance/sms_config.json`:
     }
 }
 ```
+
+### For Bot Commands
+
+No configuration needed in VM Monitor! The relay service connects to VM Monitor's API automatically using the `vm_monitor_url` in `instance/config.json`.
 
 ## License
 
