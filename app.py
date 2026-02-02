@@ -155,10 +155,18 @@ def fetch_vm_summary():
         for vm in vms:
             cpu = vm.get("cpu_avg", 0)
             ram = vm.get("ram_percent", 0)
-            if cpu >= 90 or ram >= 90:
+            if cpu >= 90:
                 alerts += 1
-            elif cpu >= 80 or ram >= 80:
+            elif cpu >= 80:
                 warnings += 1
+            
+            # Check RAM (skip if ballooning)
+            balloon = vm.get("balloon_enabled", False)
+            if not balloon:
+                if ram >= 90:
+                    alerts += 1
+                elif ram >= 80:
+                    warnings += 1
         
         # Build message
         status_emoji = "🟢" if alerts == 0 and warnings == 0 else ("🔴" if alerts > 0 else "🟡")
@@ -215,13 +223,15 @@ def fetch_vm_alerts():
 
             if not is_online:
                 issues.append(f"🔴 *{vm.get('hostname')}* is OFFLINE\n    └ _Last seen: {last_seen}_")
-            elif cpu >= 80 or ram >= 80 or disk >= 90:
+            elif cpu >= 80 or (ram >= 80 and not vm.get("balloon_enabled", False)) or disk >= 90:
                 reason = []
                 if cpu >= 80: reason.append(f"CPU {cpu:.0f}%")
-                if ram >= 80: reason.append(f"RAM {ram:.0f}%")
+                if ram >= 80 and not vm.get("balloon_enabled", False): reason.append(f"RAM {ram:.0f}%")
                 if disk >= 90: reason.append(f"Disk {disk:.0f}%")
                 
-                emoji = "🔴" if (cpu>=90 or ram>=90 or disk>=95) else "⚠️"
+                balloon = vm.get("balloon_enabled", False)
+                high_usage = cpu >= 90 or (ram >= 90 and not balloon) or disk >= 95
+                emoji = "🔴" if high_usage else "⚠️"
                 issues.append(f"{emoji} *{vm.get('hostname')}*: {', '.join(reason)}")
 
         if not issues:
